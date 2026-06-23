@@ -9,7 +9,7 @@
       "source.organizeImports.ruff": "explicit"
     }
   },
-  "ruff.lineLength": 79,
+  "ruff.lineLength": 120,
   "ruff.lint.select": ["E", "F"],
   "ruff.lint.preview": true
 }
