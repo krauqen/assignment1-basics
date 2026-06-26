@@ -22,9 +22,11 @@ class BPE:
             self.vocab[len(self.vocab)] = tok.encode("utf-8")
         self.merges: list[tuple[bytes, bytes]] = []
         self.num_processes = num_processes
+        self.pretokens_index = None
 
     def train(self):
         self.pretokenize()
+        self._create_pretokens_index()
         num_merges = max(0, self.vocab_size - len(self.vocab))
         for i in range(num_merges):
             self._merge_once()
@@ -33,6 +35,12 @@ class BPE:
     def pretokenize(self):
         pretokenizer = BPEPretokenizer(self)
         pretokenizer.pretokenize()
+
+    def _create_pretokens_index(self):
+        self.pretokens_index: defaultdict[bytes, set] = defaultdict(set)
+        for k in self.pretokenization_dict.keys():
+            for b in k:
+                self.pretokens_index[b].add(k)
 
     def _merge_once(self):
         pairs_dict = defaultdict(int)
@@ -45,20 +53,41 @@ class BPE:
             return
         pair_to_merge = sorted(pairs_dict.items(), key=lambda item: (item[1], item[0]), reverse=True)[0][0]
         updated_pretokenization_dict = defaultdict(int)
-        for bytes_tuple, count in self.pretokenization_dict.items():
-            updated_bytes_list, b2_i = [], 1
+        if self.pretokens_index is None:
+            items_to_scan = self.pretokenization_dict.items()
+        else:
+            pretokens_sample = self.pretokens_index[pair_to_merge[0]]
+            items_to_scan = [(pretoken, self.pretokenization_dict[pretoken]) for pretoken in pretokens_sample]
+        pretokens_to_remove = set()
+        for bytes_tuple, count in items_to_scan:
+            updated_bytes_list, b2_i, did_merge = [], 1, False
             while b2_i < len(bytes_tuple):
                 b1, b2 = bytes_tuple[b2_i - 1], bytes_tuple[b2_i]
                 if (b1, b2) == pair_to_merge:
                     updated_bytes_list.append(b1 + b2)
+                    did_merge = True
                     b2_i += 2
                 else:
                     updated_bytes_list.append(b1)
                     b2_i += 1
             if b2_i == len(bytes_tuple):
                 updated_bytes_list.append(bytes_tuple[-1])
-            updated_pretokenization_dict[tuple(updated_bytes_list)] += count
-        self.pretokenization_dict = updated_pretokenization_dict
+            if did_merge:
+                old_pretoken = bytes_tuple
+                new_pretoken = tuple(updated_bytes_list)
+                updated_pretokenization_dict[new_pretoken] += count
+                if self.pretokens_index is not None:
+                    for b in new_pretoken:
+                        self.pretokens_index[b].add(new_pretoken)
+                pretokens_to_remove.add(old_pretoken)
+        for pretoken in pretokens_to_remove:
+            if pretoken in self.pretokenization_dict:
+                del self.pretokenization_dict[pretoken]
+            for b in pretoken:
+                if pretoken in self.pretokens_index[b]:
+                    self.pretokens_index[b].remove(pretoken)
+        for k, v in updated_pretokenization_dict.items():
+            self.pretokenization_dict[k] += v
         self.merges.append(pair_to_merge)
         self.vocab[len(self.vocab)] = pair_to_merge[0] + pair_to_merge[1]
 
