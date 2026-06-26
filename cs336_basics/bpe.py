@@ -31,28 +31,8 @@ class BPE:
         return (self.vocab, self.merges)
 
     def pretokenize(self):
-        if self.pretokenization_dict is not None:
-            return
-        self.pretokenization_dict = defaultdict(int)
-        with open(self.input_path, "rb") as f:
-            content = f.read().decode("utf-8", errors="ignore")
-            special_token_idxs = []
-            for tok in self.special_tokens:
-                content_tok_idx = content.find(tok)
-                while content_tok_idx != -1:
-                    special_token_idxs.append([content_tok_idx, content_tok_idx + len(tok)])
-                    content_tok_idx = content.find(tok, content_tok_idx + len(tok))
-            special_token_idxs = list(sorted(special_token_idxs))
-            special_token_idxs += [(len(content), len(content))]
-            content_idx = 0
-            for special_tok_start_idx, special_tok_end_idx in special_token_idxs:
-                chunk = content[content_idx:special_tok_start_idx]
-                matches = re.finditer(self.PAT, chunk)
-                for m in matches:
-                    pretoken = m.group()
-                    pretoken_bytes = tuple(bytes([b]) for b in pretoken.encode("utf-8"))
-                    self.pretokenization_dict[pretoken_bytes] += 1
-                content_idx = special_tok_end_idx
+        pretokenizer = BPEPretokenizer(self)
+        pretokenizer.pretokenize()
 
     def _merge_once(self):
         pairs_dict = defaultdict(int)
@@ -84,3 +64,32 @@ class BPE:
 
     def __repr__(self):
         return f"BPE: input_path {self.input_path} vocab_size {self.vocab_size} special_tokens {self.special_tokens}"
+
+
+class BPEPretokenizer:
+    def __init__(self, bpe: BPE):
+        self.bpe = bpe
+
+    def pretokenize(self):
+        if self.bpe.pretokenization_dict is not None:
+            return
+        self.bpe.pretokenization_dict = defaultdict(int)
+        with open(self.bpe.input_path, "rb") as f:
+            content = f.read().decode("utf-8", errors="ignore")
+            special_token_idxs = []
+            for tok in self.bpe.special_tokens:
+                content_tok_idx = content.find(tok)
+                while content_tok_idx != -1:
+                    special_token_idxs.append([content_tok_idx, content_tok_idx + len(tok)])
+                    content_tok_idx = content.find(tok, content_tok_idx + len(tok))
+            special_token_idxs = list(sorted(special_token_idxs))
+            special_token_idxs += [(len(content), len(content))]
+            content_idx = 0
+            for special_tok_start_idx, special_tok_end_idx in special_token_idxs:
+                chunk = content[content_idx:special_tok_start_idx]
+                matches = re.finditer(self.bpe.PAT, chunk)
+                for m in matches:
+                    pretoken = m.group()
+                    pretoken_bytes = tuple(bytes([b]) for b in pretoken.encode("utf-8"))
+                    self.bpe.pretokenization_dict[pretoken_bytes] += 1
+                content_idx = special_tok_end_idx
