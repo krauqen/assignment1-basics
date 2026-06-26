@@ -1,5 +1,7 @@
 import os
 from collections import defaultdict
+from multiprocessing import Process, Queue
+from typing import BinaryIO, List
 
 import regex as re
 
@@ -9,10 +11,7 @@ class BPE:
     PAT = r"""'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"""
 
     def __init__(
-        self,
-        input_path: str | os.PathLike,
-        vocab_size: int,
-        special_tokens: list[str],
+        self, input_path: str | os.PathLike, vocab_size: int, special_tokens: list[str], num_processes: int = 8
     ):
         self.input_path = input_path
         self.vocab_size = vocab_size
@@ -22,6 +21,7 @@ class BPE:
         for tok in special_tokens:
             self.vocab[len(self.vocab)] = tok.encode("utf-8")
         self.merges: list[tuple[bytes, bytes]] = []
+        self.num_processes = num_processes
 
     def train(self):
         self.pretokenize()
@@ -69,13 +69,44 @@ class BPE:
 class BPEPretokenizer:
     def __init__(self, bpe: BPE):
         self.bpe = bpe
+        self.num_processes = self.bpe.num_processes
 
     def pretokenize(self):
         if self.bpe.pretokenization_dict is not None:
             return
-        self.bpe.pretokenization_dict = defaultdict(int)
+
         with open(self.bpe.input_path, "rb") as f:
-            content = f.read().decode("utf-8", errors="ignore")
+            chunk_boundaries = self.find_chunk_boundaries(
+                f, self.num_processes, [s.encode("utf-8", errors="strict") for s in self.bpe.special_tokens]
+            )
+        chunk_start_ends = list(zip(chunk_boundaries[:-1], chunk_boundaries[1:]))
+
+        processes, q = [], Queue()
+        for chunk_start, chunk_end in chunk_start_ends:
+            p = Process(target=self.pretokenize_chunk, args=(chunk_start, chunk_end, q))
+            p.start()
+            processes.append(p)
+
+        self.bpe.pretokenization_dict = defaultdict(int)
+        chunk_pretokens_dict = q.get()
+        q_read = 1
+        while chunk_pretokens_dict is not None:
+            for k, v in chunk_pretokens_dict.items():
+                self.bpe.pretokenization_dict[k] += v
+            if q_read != len(processes):
+                chunk_pretokens_dict = q.get()
+                q_read += 1
+            else:
+                chunk_pretokens_dict = None
+
+        for p in processes:
+            p.join()
+
+    def pretokenize_chunk(self, chunk_start: int, chunk_end: int, ret_queue: Queue):
+        pretokenization_dict = defaultdict(int)
+        with open(self.bpe.input_path, "rb") as f:
+            f.seek(chunk_start)
+            content = f.read(chunk_end - chunk_start).decode("utf-8", errors="ignore")
             special_token_idxs = []
             for tok in self.bpe.special_tokens:
                 content_tok_idx = content.find(tok)
@@ -91,5 +122,51 @@ class BPEPretokenizer:
                 for m in matches:
                     pretoken = m.group()
                     pretoken_bytes = tuple(bytes([b]) for b in pretoken.encode("utf-8"))
-                    self.bpe.pretokenization_dict[pretoken_bytes] += 1
+                    pretokenization_dict[pretoken_bytes] += 1
                 content_idx = special_tok_end_idx
+        ret_queue.put(pretokenization_dict)
+
+    def find_chunk_boundaries(
+        self,
+        file: BinaryIO,
+        desired_num_chunks: int,
+        split_special_tokens: List[bytes],
+    ) -> list[int]:
+        # Get total file size in bytes
+        file.seek(0, os.SEEK_END)
+        file_size = file.tell()
+        file.seek(0)
+
+        chunk_size = file_size // desired_num_chunks
+
+        # Initial guesses for chunk boundary locations, uniformly spaced
+        # Chunks start on previous index, don't include last index
+        chunk_boundaries = [i * chunk_size for i in range(desired_num_chunks + 1)]
+        chunk_boundaries[-1] = file_size
+
+        mini_chunk_size = 4096  # Read ahead by 4k bytes at a time
+
+        for bi in range(1, len(chunk_boundaries) - 1):
+            initial_position = chunk_boundaries[bi]
+            file.seek(initial_position)  # Start at boundary guess
+            while True:
+                mini_chunk = file.read(mini_chunk_size)  # Read a mini chunk
+
+                # If EOF, this boundary should be at the end of the file
+                if mini_chunk == b"":
+                    chunk_boundaries[bi] = file_size
+                    break
+
+                # Find any special token in the mini chunk
+                for split_special_token in split_special_tokens:
+                    found_at = mini_chunk.find(split_special_token)
+                    if found_at != -1:
+                        break
+
+                if found_at != -1:
+                    chunk_boundaries[bi] = initial_position + found_at
+                    break
+                initial_position += mini_chunk_size
+
+        # Make sure all boundaries are unique, but might be fewer than desired_num_chunks
+        return sorted(set(chunk_boundaries))
