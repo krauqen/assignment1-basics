@@ -10,8 +10,7 @@ from jaxtyping import Bool, Float, Int
 from torch import Tensor
 
 from cs336_basics.bpe import BPE
-from cs336_basics.modules.embedding import Embedding
-from cs336_basics.modules.linear import Linear
+from cs336_basics.modules import Embedding, Linear
 from cs336_basics.tokenizer import Tokenizer
 
 
