@@ -14,9 +14,7 @@ class Tokenizer:
         self.inverse_vocab = {v: k for k, v in self.vocab.items()}
         self.merges = merges
         self.special_tokens = set(special_tokens) if special_tokens is not None else set([])
-        self.special_tokens_bytes = (
-            set([tok.encode("utf-8") for tok in special_tokens]) if special_tokens is not None else set([])
-        )
+        self.merge_to_index = {(m1, m2): merge_idx for merge_idx, (m1, m2) in enumerate(self.merges)}
 
     @classmethod
     def from_files(cls, vocab_filepath, merges_filepath, special_tokens=None) -> Self:
@@ -43,16 +41,10 @@ class Tokenizer:
         return encoded
 
     def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
-        raise NotImplementedError
-        # chunk_size, iterable_done = 2048 * 2, False
-        # content = iterable.read(chunk_size)
-        # iterable_done = content == ""
-        # while content != "":
-        #     # Find next special token
-        #     if not iterable_done and len(content) < chunk_size // 2:
-        #         next_chunk = iterable.read(chunk_size)
-        #         iterable_done = next_chunk == ""
-        #         content += iterable_done
+        for line_str in iterable:
+            encoded_line = self.encode(line_str)
+            for token_id in encoded_line:
+                yield token_id
 
     def decode(self, ids: list[int]) -> str:
         decoded = []
@@ -65,7 +57,7 @@ class Tokenizer:
         # Localize special tokens: they form text chunk boundaries
         special_token_positions_dict = {}
         special_token_positions_list = []
-        if len(self.special_tokens) >= 0:
+        if len(self.special_tokens) >= 1:
             special_token_regex = "".join(
                 r"{}|".format(re.escape(tok)) for tok in sorted(self.special_tokens, key=lambda s: len(s), reverse=True)
             )[:-1]
@@ -80,23 +72,41 @@ class Tokenizer:
         special_token_positions_list.append((len(text), len(text)))
         return (special_token_positions_dict, special_token_positions_list)
 
-    def _encode_pretoken(self, pretoken: bytes) -> list[int]:
+    def _encode_pretoken(self, pretoken: list[bytes]) -> list[int]:
         encoded = []
-        for b1, b2 in self.merges:
-            if len(pretoken) <= 1:
-                break
-            updated_pretoken = []
-            pretoken_i = 1
-            while pretoken_i < len(pretoken):
-                if pretoken[pretoken_i - 1] == b1 and pretoken[pretoken_i] == b2:
-                    updated_pretoken.append(b1 + b2)
-                    pretoken_i += 2
-                else:
-                    updated_pretoken.append(pretoken[pretoken_i - 1])
-                    pretoken_i += 1
-            if pretoken_i == len(pretoken):
-                updated_pretoken.append(pretoken[pretoken_i - 1])
-            pretoken = updated_pretoken
+        merge_idx_to_apply = self._get_merge_idx_to_apply(pretoken)
+        while merge_idx_to_apply is not None:
+            m_left, m_right = self.merges[merge_idx_to_apply]
+            pretoken = self._apply_merge(pretoken, m_left, m_right)
+            merge_idx_to_apply = self._get_merge_idx_to_apply(pretoken)
         for pretoken_bs in pretoken:
             encoded.append(self.inverse_vocab[pretoken_bs])
         return encoded
+
+    def _get_merge_idx_to_apply(self, pretoken: list[bytes]) -> int | None:
+        if len(pretoken) <= 1:
+            return None
+        all_merge_idx = []
+        for b_left, b_right in zip(pretoken[:-1], pretoken[1:]):
+            if (b_left, b_right) in self.merge_to_index:
+                all_merge_idx.append(self.merge_to_index[(b_left, b_right)])
+        if all_merge_idx == []:
+            return None
+        else:
+            return min(all_merge_idx)
+
+    def _apply_merge(self, pretoken: list[bytes], m_left: bytes, m_right: bytes) -> list[bytes]:
+        if len(pretoken) <= 1:
+            return pretoken
+        updated_pretoken = []
+        pretoken_i = 1
+        while pretoken_i < len(pretoken):
+            if pretoken[pretoken_i - 1] == m_left and pretoken[pretoken_i] == m_right:
+                updated_pretoken.append(m_left + m_right)
+                pretoken_i += 2
+            else:
+                updated_pretoken.append(pretoken[pretoken_i - 1])
+                pretoken_i += 1
+        if pretoken_i == len(pretoken):
+            updated_pretoken.append(pretoken[pretoken_i - 1])
+        return updated_pretoken
