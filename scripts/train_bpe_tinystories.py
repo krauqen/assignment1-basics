@@ -3,12 +3,13 @@ from pathlib import Path
 from cs336_basics.bpe import BPE
 
 if __name__ == "__main__":
-    p = Path(__file__).resolve().parent.parent / "data" / "TinyStoriesV2-GPT4-train.txt"
+    path_in = Path(__file__).resolve().parent.parent / "data" / "TinyStoriesV2-GPT4-train.txt"
+    vocab_path_out = Path(__file__).resolve().parent.parent / "data" / "TinyStoriesV2-GPT4-train-BPE-vocab.pkl"
+    merges_path_out = Path(__file__).resolve().parent.parent / "data" / "TinyStoriesV2-GPT4-train-BPE-merges.pkl"
     bpe = BPE(
-        input_path=p,
+        input_path=path_in,
         vocab_size=10_000,
         special_tokens=["<|endoftext|>"],
     )
-    print("TRAIN START")
     bpe.train()
-    print("TRAIN DONE :)")
+    bpe.save(vocab_path_out, merges_path_out)

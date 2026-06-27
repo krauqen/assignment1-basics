@@ -41,7 +41,7 @@ class BPE:
         with open(vocab_output_path, "wb") as f:
             pickle.dump(self.vocab, f)
         with open(merges_output_path, "wb") as f:
-            pickle.dump(self.merges, merges_output_path)
+            pickle.dump(self.merges, f)
 
     def _create_pretokens_index(self):
         self.pretokens_index: defaultdict[bytes, set] = defaultdict(set)
