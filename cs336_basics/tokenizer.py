@@ -35,23 +35,7 @@ class Tokenizer:
             matches = re.finditer(BPE.PAT, chunk)
             for m in matches:
                 pretoken = [bytes([b]) for b in m.group().encode("utf-8")]
-                for b1, b2 in self.merges:
-                    if len(pretoken) <= 1:
-                        break
-                    updated_pretoken = []
-                    pretoken_i = 1
-                    while pretoken_i < len(pretoken):
-                        if pretoken[pretoken_i - 1] == b1 and pretoken[pretoken_i] == b2:
-                            updated_pretoken.append(b1 + b2)
-                            pretoken_i += 2
-                        else:
-                            updated_pretoken.append(pretoken[pretoken_i - 1])
-                            pretoken_i += 1
-                    if pretoken_i == len(pretoken):
-                        updated_pretoken.append(pretoken[pretoken_i - 1])
-                    pretoken = updated_pretoken
-                for pretoken_bs in pretoken:
-                    encoded.append(self.inverse_vocab[pretoken_bs])
+                encoded += self._encode_pretoken(pretoken)
             if (b, e) in special_token_positions_dict and special_token_positions_dict[(b, e)] is not None:
                 special_token_bytes = special_token_positions_dict[(b, e)].encode("utf-8")
                 encoded.append(self.inverse_vocab[special_token_bytes])
@@ -59,14 +43,16 @@ class Tokenizer:
         return encoded
 
     def encode_iterable(self, iterable: Iterable[str]) -> Iterator[int]:
-        # chunk_size = 4096
-        # buffer_size = 1024
-        # content = iterable.read(chunk_size + buffer_size)
-        # while content != "":
-        #     special_token_positions_dict, special_token_positions_list = self._get_special_token_data(content)
-        #     chunk =
-        #     content += iterable.read(chunk_size + buffer_size)
         raise NotImplementedError
+        # chunk_size, iterable_done = 2048 * 2, False
+        # content = iterable.read(chunk_size)
+        # iterable_done = content == ""
+        # while content != "":
+        #     # Find next special token
+        #     if not iterable_done and len(content) < chunk_size // 2:
+        #         next_chunk = iterable.read(chunk_size)
+        #         iterable_done = next_chunk == ""
+        #         content += iterable_done
 
     def decode(self, ids: list[int]) -> str:
         decoded = []
@@ -93,3 +79,24 @@ class Tokenizer:
         special_token_positions_dict[(len(text), len(text))] = None
         special_token_positions_list.append((len(text), len(text)))
         return (special_token_positions_dict, special_token_positions_list)
+
+    def _encode_pretoken(self, pretoken: bytes) -> list[int]:
+        encoded = []
+        for b1, b2 in self.merges:
+            if len(pretoken) <= 1:
+                break
+            updated_pretoken = []
+            pretoken_i = 1
+            while pretoken_i < len(pretoken):
+                if pretoken[pretoken_i - 1] == b1 and pretoken[pretoken_i] == b2:
+                    updated_pretoken.append(b1 + b2)
+                    pretoken_i += 2
+                else:
+                    updated_pretoken.append(pretoken[pretoken_i - 1])
+                    pretoken_i += 1
+            if pretoken_i == len(pretoken):
+                updated_pretoken.append(pretoken[pretoken_i - 1])
+            pretoken = updated_pretoken
+        for pretoken_bs in pretoken:
+            encoded.append(self.inverse_vocab[pretoken_bs])
+        return encoded
