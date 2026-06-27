@@ -1,4 +1,5 @@
 import os
+import pickle
 from collections import defaultdict
 from multiprocessing import Process, Queue
 from typing import BinaryIO, List
@@ -35,6 +36,12 @@ class BPE:
     def pretokenize(self):
         pretokenizer = BPEPretokenizer(self)
         pretokenizer.pretokenize()
+
+    def save(self, vocab_output_path: str | os.PathLike, merges_output_path: str | os.PathLike):
+        with open(vocab_output_path, "wb") as f:
+            pickle.dump(self.vocab, f)
+        with open(merges_output_path, "wb") as f:
+            pickle.dump(self.merges, merges_output_path)
 
     def _create_pretokens_index(self):
         self.pretokens_index: defaultdict[bytes, set] = defaultdict(set)
