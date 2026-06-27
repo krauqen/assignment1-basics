@@ -11,5 +11,6 @@
   },
   "ruff.lineLength": 120,
   "ruff.lint.select": ["E", "F"],
+  "ruff.lint.ignore": ["F722"],
   "ruff.lint.preview": true
 }
